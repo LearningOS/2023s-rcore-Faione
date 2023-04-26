@@ -14,9 +14,11 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
+use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
+use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -42,7 +44,7 @@ pub struct TaskManager {
 /// Inner of Task Manager
 pub struct TaskManagerInner {
     /// task list
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
 }
@@ -51,10 +53,17 @@ lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
-        }; MAX_APP_NUM];
+        let mut tasks: Vec<TaskControlBlock> = Vec::new();
+
+        for _ in 0..MAX_APP_NUM{
+            let task = TaskControlBlock{
+                task_cx: TaskContext::zero_init(),
+                task_status: TaskStatus::UnInit,
+                running_time: 0,
+                syscall_times: [0;MAX_SYSCALL_NUM],
+            };
+            tasks.push(task)
+        }
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
             task.task_status = TaskStatus::Ready;
@@ -80,6 +89,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.running_time = get_time_us();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -102,6 +112,9 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Exited;
+
+        // 退出时，记录当前时间
+        inner.tasks[current].running_time = get_time_us() - inner.tasks[current].running_time;
     }
 
     /// Find next task to run and return task id.
@@ -123,6 +136,12 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
+
+            // 首次被调度运行时，记录时间戳
+            if inner.tasks[next].running_time == 0 {
+                inner.tasks[next].running_time = get_time_us();
+            }
+
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -134,6 +153,21 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    /// 获取当前CPU上正在运行的task的信息
+    fn find_task_info(&self) -> TaskControlBlock {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let task = inner.tasks.get(current).unwrap();
+        task.clone()
+    }
+
+    /// 当task陷入内核时, 如果是syscall, 则可以通过此方法更新syscall调用信息
+    fn update_task_syscall_info(&self, syscall: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall] += 1
     }
 }
 
@@ -168,4 +202,14 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// 获取当前task的信息
+pub fn find_task_info() -> TaskControlBlock {
+    TASK_MANAGER.find_task_info()
+}
+
+/// 更新syscall info
+pub fn update_task_syscall_info(syscall: usize) {
+    TASK_MANAGER.update_task_syscall_info(syscall);
 }
