@@ -51,17 +51,17 @@ jobs:
     if: github.repository == 'LearningOS/rCore-Tutorial-Code-2023S'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: Mirror + trigger CI
-      uses: Gallium70/gitlab-mirror-and-ci-action@master
-      with:
-        args: "https://git.tsinghua.edu.cn/os-lab/2023s/public/rcore-tutorial-code-2023s"
-      env:
-        GITLAB_HOSTNAME: "git.tsinghua.edu.cn"
-        GITLAB_PROJECT_ID: "20881"
-        GITLAB_PROJECT_NAME: "rcore-tutorial-code-2023s"
-        GITLAB_PROJECT_TOKEN: ${{ secrets.GITLAB_PROJECT_TOKEN }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v1
+      - name: Mirror + trigger CI
+        uses: Gallium70/gitlab-mirror-and-ci-action@master
+        with:
+          args: "https://git.tsinghua.edu.cn/os-lab/2023s/public/rcore-tutorial-code-2023s"
+        env:
+          GITLAB_HOSTNAME: "git.tsinghua.edu.cn"
+          GITLAB_PROJECT_ID: "20881"
+          GITLAB_PROJECT_NAME: "rcore-tutorial-code-2023s"
+          GITLAB_PROJECT_TOKEN: ${{ secrets.GITLAB_PROJECT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   deploy:
     if: github.repository != 'LearningOS/rCore-Tutorial-Code-2023S'
     name: Deploy to pages
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v3
         continue-on-error: true
         with:
-          ref: 'gh-pages'
+          ref: "gh-pages"
       - name: Save Log File
         uses: yfblock/multi-rank-log@main
         with:
