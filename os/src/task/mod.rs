@@ -205,7 +205,7 @@ pub fn exit_current_and_run_next() {
 }
 
 /// 获取当前task的信息
-pub fn find_task_info() -> TaskControlBlock {
+pub fn current_task_control_block() -> TaskControlBlock {
     TASK_MANAGER.find_task_info()
 }
 
