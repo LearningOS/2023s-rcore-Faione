@@ -1,8 +1,8 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
+use alloc::{format, vec};
 use bitflags::*;
 
 bitflags! {
@@ -157,6 +157,32 @@ impl PageTable {
     /// get the token from the page table
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
+    }
+}
+
+/// map/unmap
+impl PageTable {
+    pub fn map_result(
+        &mut self,
+        vpn: VirtPageNum,
+        ppn: PhysPageNum,
+        flags: PTEFlags,
+    ) -> Result<(), String> {
+        let pte = self.find_pte_create(vpn).unwrap();
+        if pte.is_valid() {
+            return Err(format!("vpn {:?} is mapped before mapping", vpn));
+        }
+        *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+        Ok(())
+    }
+
+    pub fn unmap_result(&mut self, vpn: VirtPageNum) -> Result<(), String> {
+        let pte = self.find_pte_create(vpn).unwrap();
+        if !pte.is_valid() {
+            return Err(format!("vpn {:?} is invalid before unmapping", vpn));
+        }
+        *pte = PageTableEntry::empty();
+        Ok(())
     }
 }
 
