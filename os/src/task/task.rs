@@ -1,9 +1,10 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 
 /// The task control block (TCB) of a task.
@@ -28,6 +29,9 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Variable task info,
+    pub inner: TaskControlBlockInner,
 }
 
 impl TaskControlBlock {
@@ -63,6 +67,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            inner: TaskControlBlockInner::new(),
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -95,6 +100,35 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TaskControlBlockInner {
+    pub runtime: usize,
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+}
+
+impl TaskControlBlockInner {
+    fn new() -> TaskControlBlockInner {
+        Self {
+            runtime: 0,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+        }
+    }
+
+    pub fn init_time(&mut self) {
+        if self.runtime == 0 {
+            self.runtime = get_time_ms()
+        }
+    }
+
+    pub fn exit_time(&mut self) {
+        self.runtime = get_time_ms() - self.runtime;
+    }
+
+    pub fn update_syscall_info(&mut self, syscall_id: usize) {
+        self.syscall_times[syscall_id] += 1;
     }
 }
 

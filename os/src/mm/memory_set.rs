@@ -9,6 +9,7 @@ use crate::config::{
 };
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::arch::asm;
@@ -355,6 +356,105 @@ impl MapArea {
             }
             current_vpn.step();
         }
+    }
+}
+
+impl MemorySet {
+    fn push_result(&mut self, mut map_area: MapArea, data: Option<&[u8]>) -> Result<(), String> {
+        map_area.map_result(&mut self.page_table)?;
+        if let Some(data) = data {
+            map_area.copy_data(&mut self.page_table, data);
+        }
+        self.areas.push(map_area);
+        Ok(())
+    }
+
+    /// Assume that no conflicts.
+    pub fn insert_framed_area_result(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        permission: MapPermission,
+    ) -> Result<(), String> {
+        let area = MapArea::new(start_va, end_va, MapType::Framed, permission);
+        self.push_result(area, None)
+    }
+
+    /// Assume that no conflicts.
+    pub fn remove_area_result(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+    ) -> Result<(), String> {
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+
+        if let Some((idx, area)) = self.areas.iter_mut().enumerate().find(|(_, area)| {
+            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        }) {
+            area.unmap_result(&mut self.page_table)?;
+            self.areas.remove(idx);
+            Ok(())
+        } else {
+            Err("wrong len".to_string())
+        }
+    }
+}
+
+impl MapArea {
+    /// 映射一个虚拟页
+    pub fn map_one_result(
+        &mut self,
+        page_table: &mut PageTable,
+        vpn: VirtPageNum,
+    ) -> Result<(), String> {
+        let ppn: PhysPageNum;
+        match self.map_type {
+            MapType::Identical => {
+                return Err("invalid map type".to_string());
+            }
+            MapType::Framed => {
+                let frame = frame_alloc().unwrap();
+                ppn = frame.ppn;
+                self.data_frames.insert(vpn, frame);
+            }
+        }
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        page_table.map_result(vpn, ppn, pte_flags)
+    }
+
+    #[allow(unused)]
+    /// 取消映射一个虚拟页
+    pub fn unmap_one_result(
+        &mut self,
+        page_table: &mut PageTable,
+        vpn: VirtPageNum,
+    ) -> Result<(), String> {
+        #[allow(clippy::single_match)]
+        match self.map_type {
+            MapType::Framed => {
+                self.data_frames.remove(&vpn);
+            }
+            _ => return Err("invalid map type".to_string()),
+        }
+        page_table.unmap_result(vpn)
+    }
+
+    /// 映射整个map area
+    pub fn map_result(&mut self, page_table: &mut PageTable) -> Result<(), String> {
+        for vpn in self.vpn_range {
+            self.map_one_result(page_table, vpn)?;
+        }
+        Ok(())
+    }
+
+    #[allow(unused)]
+    /// 取消映射整个map area
+    pub fn unmap_result(&mut self, page_table: &mut PageTable) -> Result<(), String> {
+        for vpn in self.vpn_range {
+            self.unmap_one_result(page_table, vpn)?;
+        }
+        Ok(())
     }
 }
 

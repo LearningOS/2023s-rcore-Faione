@@ -15,8 +15,12 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
+use crate::syscall::TaskInfo;
+use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
+use alloc::string::String;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
@@ -79,6 +83,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        next_task.inner.init_time();
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -101,6 +106,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         inner.tasks[cur].task_status = TaskStatus::Exited;
+        inner.tasks[cur].inner.exit_time();
     }
 
     /// Find next task to run and return task id.
@@ -153,6 +159,49 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// 更新当前task的syscall信息
+    fn update_syscall_info(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].inner.update_syscall_info(syscall_id);
+    }
+
+    /// 返回当前task的inner信息
+    fn current_task_info(&self) -> TaskInfo {
+        let inner = self.inner.exclusive_access();
+        let task = &inner.tasks[inner.current_task];
+
+        let time = match task.task_status {
+            TaskStatus::Exited => task.inner.runtime,
+            _ => get_time_ms() - task.inner.runtime,
+        };
+
+        TaskInfo::new(task.task_status, task.inner.syscall_times, time)
+    }
+
+    /// 为当前task 映射虚拟地址
+    fn memory_map(
+        &self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        map_perm: MapPermission,
+    ) -> Result<(), String> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .insert_framed_area_result(start_va, end_va, map_perm)
+    }
+
+    /// 取消为当前task 映射虚拟地址
+    fn memeory_unmap(&self, start_va: VirtAddr, end_va: VirtAddr) -> Result<(), String> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .remove_area_result(start_va, end_va)
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +250,28 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Current task info
+pub fn current_task_info() -> TaskInfo {
+    TASK_MANAGER.current_task_info()
+}
+
+/// Update syscall
+pub fn update_syscall(syscall_id: usize) {
+    TASK_MANAGER.update_syscall_info(syscall_id)
+}
+
+/// 为当前task 映射虚拟地址
+pub fn memory_map(
+    start_va: VirtAddr,
+    end_va: VirtAddr,
+    map_perm: MapPermission,
+) -> Result<(), String> {
+    TASK_MANAGER.memory_map(start_va, end_va, map_perm)
+}
+
+/// 取消为当前task 映射虚拟地址
+pub fn memeory_unmap(start_va: VirtAddr, end_va: VirtAddr) -> Result<(), String> {
+    TASK_MANAGER.memeory_unmap(start_va, end_va)
 }
