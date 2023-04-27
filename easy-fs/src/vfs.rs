@@ -184,3 +184,95 @@ impl Inode {
         block_cache_sync_all();
     }
 }
+
+impl Inode {
+    /// 计算目标inode的硬链接数量
+    pub fn cal_link(&self, inode: Arc<Inode>) -> (u64, u32) {
+        let fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            // 要求当前inode为一个目录，这样才能查询目标inode的硬链接数量
+            assert!(disk_inode.is_dir());
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+
+            let mut link_count: u32 = 0;
+            let mut inode_id: u64 = 0;
+            for i in 0..file_count {
+                assert_eq!(
+                    disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+
+                let (block_id, block_offset) = fs.get_disk_inode_pos(dirent.inode_id());
+                if block_id == inode.block_id as u32 && block_offset == inode.block_offset {
+                    link_count += 1;
+                    inode_id = dirent.inode_id() as u64;
+                }
+            }
+            (inode_id, link_count)
+        })
+    }
+
+    /// 增加硬链接
+    pub fn linkat(&self, old_name: &str, new_name: &str) {
+        let mut fs = self.fs.lock();
+        self.modify_disk_inode(|disk_inode| {
+            self.find_inode_id(old_name, disk_inode).map(|inode_id| {
+                let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+                let new_size = (file_count + 1) * DIRENT_SZ;
+                self.increase_size(new_size as u32, disk_inode, &mut fs);
+
+                let dirent = DirEntry::new(new_name, inode_id);
+                disk_inode.write_at(
+                    file_count * DIRENT_SZ,
+                    dirent.as_bytes(),
+                    &self.block_device,
+                );
+            });
+        });
+        block_cache_sync_all();
+    }
+
+    /// 删除硬链接
+    pub fn unlinkat(&self, name: &str) {
+        let mut fs = self.fs.lock();
+        let mut v: Vec<DirEntry> = Vec::new();
+
+        self.modify_disk_inode(|disk_inode| {
+            assert!(disk_inode.is_dir());
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.name() != name {
+                    v.push(dirent)
+                }
+            }
+            if v.len() == file_count {
+                return;
+            }
+
+            // 清空当前目录
+            let size = disk_inode.size;
+            let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
+            assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+            for data_block in data_blocks_dealloc.into_iter() {
+                fs.dealloc_data(data_block);
+            }
+
+            // 重写目录
+            let new_size = v.len() * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, disk_inode, &mut fs);
+            // write dirent
+            for (idx, dirent) in v.iter().enumerate() {
+                disk_inode.write_at(idx * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+            }
+        });
+        block_cache_sync_all();
+    }
+}
