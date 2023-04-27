@@ -119,6 +119,17 @@ pub fn current_kstack_top() -> usize {
     current_task().unwrap().kstack.get_top()
 }
 
+/// get current task id
+pub fn current_task_id() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid
+}
+
 /// Return to idle control flow for new scheduling
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();

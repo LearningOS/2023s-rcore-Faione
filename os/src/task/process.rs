@@ -7,8 +7,9 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
-use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
+use crate::sync::{Condvar, DeadLockChecker, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -49,6 +50,10 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// mutex deadlock checker
+    pub mutex_checker: Option<Box<DeadLockChecker>>,
+    /// semaphore deadlock checker
+    pub semaphore_checker: Option<Box<DeadLockChecker>>,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +124,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_checker: None,
+                    semaphore_checker: None,
                 })
             },
         });
@@ -245,6 +252,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_checker: None,
+                    semaphore_checker: None,
                 })
             },
         });
