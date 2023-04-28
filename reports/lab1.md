@@ -41,6 +41,15 @@ OS已实现的部分中，可以很容易的获得任务状态， 但对于系�
 ### 2
 
 
+1. `a0` 代表的了当前任务的trap context
+- 初始时应用内核栈中会压入一个TrapContext,其中设置了应用Entry和用户栈，同时设置了应用首次switch的ra为 `__restore`，此时 `__restore`的用法为从内核态跳转至用户程序并开始执行
+- 其余时间，`__restore` 都用来恢复task上下文并返回中断处继续执行
+2. `sstatus`， `sepc`， `sscratch` 三个CSR寄存器, 更改`sstatus`意味着恢复CPU状态，`sepc` 保存了中断前要执行的指令，`sscratch`包存了用户栈指针
+3.  `x2` 为sp寄存器，其值已经保存到 `sscratch`中 ，`x4` 为tp(Thread Pointer)寄存器，当前实现中并不存在线程切换，也没有必要保存 
+4.  `sp` 恢复为了用户栈， `sscratch` 则保存了内核栈
+5.  `sret`, 该指令执行时，会修改 `sstatus` 中的 `spp` 恢复为之前的特权级，同时将 `pc` 设置为 `sepc` 中的值以恢复到用户程序执行
+6.  `sp`设置为内核栈，而`sscratch`保存了用户栈
+7.  `ecall`
 
 
 ## 荣誉准则
